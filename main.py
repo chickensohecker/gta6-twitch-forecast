@@ -41,8 +41,11 @@ import os
 import sys
 from datetime import datetime
 
-# Standard normal quantiles at the five forecast levels 0.05/0.25/0.5/0.75/0.95.
-NORMAL_Z = (-1.645, -0.674, 0.0, 0.674, 1.645)
+# Standard normal quantiles at the forecast levels. The program reads the
+# levels from each case file (they are 0.05/0.25/0.5/0.75/0.95 in the
+# schema) instead of assuming them, and falls back to the schema's levels
+# if a case carries something unexpected.
+Z_BY_LEVEL = {0.05: -1.645, 0.25: -0.674, 0.5: 0.0, 0.75: 0.674, 0.95: 1.645}
 LEVELS = (0.05, 0.25, 0.5, 0.75, 0.95)
 
 # Log-spread per sqrt(hour) below the median and above it (see docstring).
@@ -108,14 +111,15 @@ def hour_median_log_ratio(comparables, hour):
     return weighted_quantile(votes, 0.5)
 
 
-def forecast_hour(hour, hour_one_print, comparables):
+def forecast_hour(hour, hour_one_print, comparables, levels):
     """Five quantiles for one hour, as viewer counts."""
     median_log = hour_median_log_ratio(comparables, hour)
     if median_log is None:
         median_log = 0.0
     widen = math.sqrt(hour - 1)
     quantiles = []
-    for z in NORMAL_Z:
+    for level in levels:
+        z = Z_BY_LEVEL[level]
         spread = SPREAD_DOWN if z < 0 else SPREAD_UP
         value = hour_one_print * math.exp(median_log + z * spread * widen)
         quantiles.append(value)
@@ -149,6 +153,9 @@ def hour_one_print(case):
 def forecast_case(case):
     """Build the whole forecast object for one case."""
     print_one = hour_one_print(case)
+    levels = case.get("levels") or LEVELS
+    if not all(level in Z_BY_LEVEL for level in levels):
+        levels = LEVELS
     comparables = []
     for comparable in case.get("comparables") or []:
         try:
@@ -157,7 +164,7 @@ def forecast_case(case):
             continue
     hours = []
     for hour in range(2, 25):
-        hours.append({"hour": hour, "q": forecast_hour(hour, print_one, comparables)})
+        hours.append({"hour": hour, "q": forecast_hour(hour, print_one, comparables, levels)})
     return {"hours": hours}
 
 
